@@ -12,10 +12,10 @@ telegram_token = os.getenv("TELEGRAM_TOKEN")
 
 
 # Initialize the Telegram bot
-bot = telebot.TeleBot(telegram_token, parse_mode=None)
+bot = telebot.TeleBot("7373688141:AAFEOzkeDy1UVY5JFMAN0lUIai57nJpibYE", parse_mode=None)
 
 # Configure the API key for Gemini
-genai.configure(api_key=gemini_api_key)
+genai.configure(api_key="AIzaSyAHHJt0nkFD9VlXv4nbYBJrAYwUiVl-HJA")
 
 def read_local_excel(file_path):
     """Read the local Excel file and return its content."""
