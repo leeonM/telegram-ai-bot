@@ -1,77 +1,74 @@
-import telebot
 import os
-import pandas as pd
+import time
 import google.generativeai as genai
-from dotenv import load_dotenv
-import csv
-import PyPDF2
 
-load_dotenv()
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
+def upload_to_gemini(path, mime_type=None):
+  """Uploads the given file to Gemini.
 
-gemini_api_key = os.getenv("GEMINI_API_KEY")
-telegram_token = os.getenv("TELEGRAM_TOKEN")
+  See https://ai.google.dev/gemini-api/docs/prompting_with_media
+  """
+  file = genai.upload_file(path, mime_type=mime_type)
+  print(f"Uploaded file '{file.display_name}' as: {file.uri}")
+  return file
 
+def wait_for_files_active(files):
+  """Waits for the given files to be active.
 
+  Some files uploaded to the Gemini API need to be processed before they can be
+  used as prompt inputs. The status can be seen by querying the file's "state"
+  field.
 
-# Initialize the Telegram bot
-bot = telebot.TeleBot(telegram_token, parse_mode=None)
+  This implementation uses a simple blocking polling loop. Production code
+  should probably employ a more sophisticated approach.
+  """
+  print("Waiting for file processing...")
+  for name in (file.name for file in files):
+    file = genai.get_file(name)
+    while file.state.name == "PROCESSING":
+      print(".", end="", flush=True)
+      time.sleep(10)
+      file = genai.get_file(name)
+    if file.state.name != "ACTIVE":
+      raise Exception(f"File {file.name} failed to process")
+  print("...all files ready")
+  print()
 
-# Configure the API key for Gemini
-genai.configure(api_key=gemini_api_key)
-
-def read_local_excel(file_path):
-    """Read the local Excel file and return its content."""
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"The file {file_path} does not exist.")
-    
-    excel_data = pd.ExcelFile(file_path)
-    print(f"Loaded file '{file_path}' with sheet names: {excel_data.sheet_names}")
-    return excel_data
-
-def read_pdf(file_path):
-    """Read a PDF file and extract text content."""
-    with open(file_path, "rb") as file:
-        reader = PyPDF2.PdfReader(file)
-        text = ''
-        for page in reader.pages:
-            text += page.extract_text()
-    print(f"Loaded PDF file '{file_path}' with {len(reader.pages)} pages.")
-    return text
-
-def generate_gemini_response(chat_session, user_message, excel_data):
-    """Generate a response using Gemini and include information from the Excel file if relevant."""
-    # Send the user's message to Gemini and get the response
-    response = chat_session.send_message(user_message)
-    
-    # Check if any sheet names (city names) are mentioned in the response
-    response_text = response.text
-    
-    return response_text
-
-# Define the path to the local Excel file
-local_excel_path = "city-motives.pdf"
-
-# Read the local Excel file
-excel_data = read_pdf(local_excel_path)
-
-# Create the model configuration
+# Create the model
 generation_config = {
-    "temperature": 1,
-    "top_p": 0.95,
-    "top_k": 64,
-    "max_output_tokens": 8192,
-    "response_mime_type": "text/plain",
+  "temperature": 1,
+  "top_p": 0.95,
+  "top_k": 64,
+  "max_output_tokens": 8192,
+  "response_mime_type": "text/plain",
 }
 
-# Initialize the Gemini model
 model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    generation_config=generation_config,
-    system_instruction="You are a friendly assistant who works as a nightlife tour guide for black events in different cities. Your job is to ask the user what they would like to do. When the user greets you, ask them what they would like to do and in which city. When you get a response, review the attached google sheet, specifically in the tab for the city they have specified, and provide some responses depending on what they're looking for, including the Instagram handle for each response. If there's nothing that matches in the sheet, just tell them you don't know what's available but will make sure to find out for next time.",
+  model_name="gemini-1.5-flash",
+  generation_config=generation_config,
+  # safety_settings = Adjust safety settings
+  # See https://ai.google.dev/gemini-api/docs/safety-settings
+  system_instruction="You are a friendly assistant who works as a nightlife tour guide for black events in different cities. your job is to ask the user what they would like to do. When the user greets you, ask them what they would like to do and in which city, when you get a response, review the attached document, specifically in the tab for the city they have specified and provide some responses depending on what they're looking for including the instagram handle for each response. If there's nothing that matches in the document, just tell them you don't know what's available but will make sure to find out for next time ",
 )
 
-# Since files are now local, we don't need to wait for file processing
+# TODO Make these files available on the local file system
+# You may need to update the file paths
+files = [
+  upload_to_gemini("City motives", mime_type="application/vnd.google-apps.spreadsheet"),
+  upload_to_gemini("City motives", mime_type="application/vnd.google-apps.spreadsheet"),
+  upload_to_gemini("City motives", mime_type="application/vnd.google-apps.spreadsheet"),
+  upload_to_gemini("City motives.pdf", mime_type="application/pdf"),
+  upload_to_gemini("City motives.pdf", mime_type="application/pdf"),
+  upload_to_gemini("City motives.pdf", mime_type="application/pdf"),
+  upload_to_gemini("City motives.pdf", mime_type="application/pdf"),
+  upload_to_gemini("City motives.pdf", mime_type="application/pdf"),
+  upload_to_gemini("City motives.pdf", mime_type="application/pdf"),
+]
+
+# Some files have a processing delay. Wait for them to be ready.
+wait_for_files_active(files)
+
 chat_session = model.start_chat(
   history=[
     {
@@ -89,6 +86,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[0],
         "I'm in Paris from Friday to Monday, can you let me know what I can do on friday night and saturday evening and night then let me know what options i have for the sunday daytime",
       ],
     },
@@ -137,6 +135,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[1],
         "I'm in paris this week, what options do i have available midweek. I'm quite open minded so thinking to go out for dinner and maybe go out for drinks. are there places i can go with hip hop, rnb or afrobeats",
       ],
     },
@@ -185,6 +184,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[2],
         "i'm looking to go to paris in a few weeks. I'm looking for specific events that play hip hop. Can you let me know what events to look out for please?",
       ],
     },
@@ -197,6 +197,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[3],
         "Hey im gonna be in london and want to know some popular events to look out for, can you give me some to explore, i don't need them to be on specific days as i want to see whats available and see if they are on ",
       ],
     },
@@ -209,6 +210,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[4],
         "thats really great, now im interested in venues that are on regularly in london, can you let me know some places with black focused music/nightlife that are always open during the weekend ",
       ],
     },
@@ -221,6 +223,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[5],
         "this is perfect, so im going to be staying in South London and I dont want to spend too much on uber. can you list the places/events in south london i should look out for so my journey to them isn't as long ",
       ],
     },
@@ -245,6 +248,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[6],
         "I dont have any suggestions for south london, but i was curious. I am a huge arsenal fan and they have a game this weekend being televised. Can you tell me where i can go to watch the game ",
       ],
     },
@@ -281,6 +285,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[7],
         "hey, im gonna be in London this week and i want to go out for brunch. where can you recommend? ",
       ],
     },
@@ -293,6 +298,7 @@ chat_session = model.start_chat(
     {
       "role": "user",
       "parts": [
+        files[8],
         "so im going to be in London, I want to go somewhere that mainly plays afrobeats. I want a lounge that also has shisha but would also like other options, can you give me some options?",
       ],
     },
@@ -329,10 +335,6 @@ chat_session = model.start_chat(
   ]
 )
 
-@bot.message_handler(func=lambda m: True)
-def echo_all(message):
-    # Use the existing chat history to generate a response
-    response_text = generate_gemini_response(chat_session, message.text, excel_data)
-    bot.reply_to(message, response_text)
+response = chat_session.send_message("INSERT_INPUT_HERE")
 
-bot.infinity_polling()
+print(response.text)
